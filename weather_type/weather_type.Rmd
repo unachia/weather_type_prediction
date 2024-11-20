@@ -1,6 +1,6 @@
 ---
 title: "weather_type_prediction"
-author: "Valerie Liu"
+author: "Ting Chia Liu"
 date: "2024-11-06"
 mainfont: Arial
 fontsize: 12pt
