@@ -1,0 +1,786 @@
+---
+title: "weather_type_prediction"
+author: "Valerie Liu"
+date: "2024-11-06"
+mainfont: Arial
+fontsize: 12pt
+urlcolor: blue
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+geometry: margin=1in
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+## Project Overview: Weather Type Classification
+
+The goal of this project is to predict the type of weather based on a
+range of 10 different features, including various environmental factors
+such as temperature, humidity, wind speed, and more. These measurements
+are critical for understanding weather patterns and can be used for
+various applications in meteorology, agriculture, and other domains.
+
+### Dataset Overview
+
+The data used for this project is sourced from Kaggle
+(<https://www.kaggle.com/datasets/nikhil7280/weather-type-classification/data>)
+and contains measurements related to weather. It is a **multivariate
+classification problem** where we aim to predict the weather type based
+on several predictor variables. The dataset consists of continuous and
+categorical variables.
+
+Here's variables in the dataset:
+
+1.  **Temperature (numeric)**: Represents the temperature in degrees
+    Celsius.
+
+2.  **Humidity (numeric)**: Represents the humidity percentage.
+
+3.  **Wind Speed (numeric)**: Represents the wind speed in kilometers
+    per hour (km/h).
+
+4.  **Precipitation (%) (numeric)**: Represents the percentage of
+    precipitation, indicating the likelihood of rain or snow.
+
+5.  **Cloud Cover (categorical)**: Describes the amount of cloud cover
+    in the sky such as "clear", "cloudy", "overcast", "partly cloudy"
+
+6.  **Atmospheric Pressure (numeric)**: Represents the atmospheric
+    pressure in hPa (hectopascals).
+
+7.  **UV Index (numeric)**: Measures the intensity of ultraviolet
+    radiation.
+
+8.  **Season (categorical)**: Indicates the season during which the data
+    was recorded.
+
+9.  **Visibility (km) (numeric)**: Represents the visibility in
+    kilometers (km).
+
+10. **Location (categorical)**: Represents the type of location where
+    the data was recorded, such as "inland", "mountain", "coastal".
+
+11. **Weather Type (categorical, target variable)**: The target variable
+    for classification, representing the type of weather at a given
+    time. Categories include "Sunny", "Rainy", "Snowy", "Cloudy".
+
+### Objective
+
+The aim is to predict the **Weather Type** based on the 10 input
+variables. This is a classification problem, and the most commonly used
+evaluation metrics for classification include: - **Accuracy** -
+**Confusion Matrix** - **Precision, Recall, F1-Score** -
+**Cross-Validation Performance**
+
+### Approach Overview
+
+1.  **Data Preprocessing**:
+
+    -   **Missing Data Handling**: Identify missing values.
+    -   **Outlier Detection**: Handle outliers in numerical data (e.g.,
+        temperature, humidity).
+    -   **Feature Scaling**: Standardize or normalize numerical features
+        like temperature, humidity, and wind speed to ensure that all
+        features have a similar scale.
+
+2.  **Exploratory Data Analysis (EDA)**:
+
+    -   Visualize the distribution of each feature (e.g., histograms,
+        box plots).
+    -   Analyze correlations between numerical features.
+    -   Investigate class distributions for the target variable (Weather
+        Type).
+
+3.  **Model Selection & Model Tuning**:
+
+    -   Since this is a classification task, we used three algorithms:
+        -   K-Nearest Neighbors (KNN): the value of `k` in KNN
+        -   Decision Tree: the number of cp
+        -   Random Forest: the number of mtry in a random forest
+    -   Use cross-validation to assess model performance and select the
+        best algorithm.
+    -   Plot confusion matrix to visualize classification performance.
+    -   Assess performance using metrics like accuracy, precision,
+        recall, and F1-score.
+    -   Use a separate test set to evaluate model performance.
+    -   Comparison Model's Performance
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 8, 
+  fig.height = 5, 
+  out.width = '80%', 
+  dpi = 300, 
+  echo = TRUE
+)
+```
+
+```{r Setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(class)
+library(caret)
+library(plyr)
+library(dplyr)
+library(psych)
+library(pROC)
+```
+
+### 1. Data preparation
+
+```{r}
+weather <- read.csv("weather_classification_data.csv")
+```
+
+```{r}
+# check data type
+str(weather)
+```
+
+```{r}
+# Changed the variable names (Precipitation and Visibility.km)
+# and the character variables into factor. 
+weather <- weather %>%
+  dplyr::rename(
+    Precipitation = `Precipitation....`,
+    Visibility.km = `Visibility..km.`
+  ) %>%
+  mutate(
+    Cloud.Cover = as.factor(Cloud.Cover),
+    Season = as.factor(Season),
+    Location = as.factor(Location),
+    Weather.Type = as.factor(Weather.Type)
+  )
+```
+
+```{r}
+#check missing values
+any(is.na(weather)) #no missing value
+```
+
+### 2.Exploratory Data Analysis (EDA)
+
+#### 2.1 Description Dataset - summary function for each variable
+
+```{r}
+summary(weather)
+```
+
+#### 2.2 Target variable distirbution
+
+There are four weather types in dataset: Cloudy, Rainy, Snowy and Sunny,
+each with 3300 observations, indicating an even distribution across
+weather categories.
+
+```{r}
+weather %>% 
+  ggplot(aes(x = Weather.Type)) +
+  geom_bar(aes(fill = Weather.Type))+
+  geom_text(stat = "count", 
+            aes(label = ..count..), 
+            vjust = -0.5) +
+  labs(title = "Distribution of Weather Type")+
+  theme_minimal()
+
+# For each weather type, there are 3300 obervations, 
+# the data is scaled already, no need of data scaling.
+```
+
+#### 2.3 Quantitative variable distribution for different Weather Type
+
+The distribution of humidity, precipitation, temperature, UV index, and
+visibility vary significantly across the different weather types. We can
+anticipate that these variables will greatly contribute for
+classification of wheather type. On the other hand the pressure and wind
+speed remain relatively consistent throughout the weather type, and will
+probably not greatly influence the model for weather classification.
+Humidity levels are obviously high during cloudy and rainy weather
+types. Precipitation is much higher on rainy days and is nearly absent
+on sunny days. Temperature, UV index, and visibility are highest on
+sunny days. In contrast, pressure and wind speed do not shows
+substantial variation across different weather types.
+
+```{r}
+# Distribution of the numerical variable based on 
+# the different weather conditions
+weather %>%
+  pivot_longer(where(is.numeric)) %>%
+  ggplot(aes(y = value, fill=Weather.Type)) +
+  geom_boxplot(alpha = 0.8, color="Black") +
+  facet_wrap(~name, scales = "free") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal()
+```
+
+#### 2.4 Qualitative variable distribution for different Weather Type
+
+For the cloud cover variables, sunny weather is mostly associated with
+clear cloud cover, while cloudy and rainy weather occurs mainly under
+cloudy and overcast cloud cover. Rainy and sunny weather are equally
+shown across coastal, inland, and mountain areas. While snowy weather is
+mostly found in mountain and inland areas. Looking at the season
+variables, snowy weather only occurs in winter, while sunny, rainy and
+cloudy weather can be found in all seasons.
+
+```{r}
+weather %>%
+  pivot_longer(cols = -c(where(is.numeric), Weather.Type)) %>%
+  ggplot(aes(x = value, fill =Weather.Type)) +
+  geom_bar(position = "dodge", 
+           alpha = 0.9, 
+           color = "black", 
+           size = 0.3) +
+  facet_wrap(~name, scales = "free") +
+  scale_fill_viridis_d() + 
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Distribution of Categorical Variables by Weather Conditions") +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+### 3. Model Selection & Model Tuning
+
+```{r}
+set.seed(123) #For reproducibility
+# create a train_index to help divide the train and test dataset
+train_index <- sample(1:nrow(weather), 0.8*nrow(weather))
+
+train_weather <- weather[train_index,]
+test_weather <- weather[-train_index,]
+```
+
+#### 3.1 KNN (tuning K value)
+
+```{r, fig.width=5, fig.height=4, fig.align="center"}
+set.seed(123) #For reproducibility
+#KNN with Z-score scaling
+train_control <- trainControl(method = "cv", number = 10)
+#define K range from 1 to 20
+tune_grid <- expand.grid(k = 1:20)
+
+knn_fit <- train(
+  Weather.Type ~ .,
+  data = train_weather,
+  method = "knn",
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  preProcess = c("center", "scale")
+)
+
+plot(knn_fit)
+
+print(knn_fit)
+
+knn_fit$bestTune #Best K=3
+```
+
+After tuning the value of k from 1 to 20, the plot indicates that the
+highest accuracy is achieved when k=3, suggesting that this value of k
+provides the best model performance.
+
+#### Prediction with KNN
+
+```{r}
+predictions_knn <- predict(knn_fit, newdata = test_weather)
+cm <- confusionMatrix(predictions_knn, test_weather$Weather.Type)
+cm
+
+# Plot confusion matrix as a heatmap
+cm_df <- as.data.frame(cm$table)
+ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black") +
+  scale_fill_gradient(low = "pink", high = "red") +
+  labs(title = "Confusion Matrix Heatmap",
+       x = "Predicted Label",
+       y = "Observed Label")
+
+# Create a data frame to compare actual and predicted classes
+comparison_df <- data.frame(Actual = test_weather$Weather.Type, 
+                            Predicted = predictions_knn)
+
+# Create a bar plot of Actual vs Predicted classes
+ggplot(comparison_df, aes(x = Actual, fill = Predicted)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = "count", aes(label = ..count..), 
+            position = position_dodge(width = 0.8), 
+            vjust = -0.5) +
+  labs(title = "Actual vs Predicted Weather Types",
+       x = "Actual Weather Type",
+       y = "Count") +
+  theme_minimal()
+# The bigger bars are the correctly predicted classes and 
+# the small bars are the misclassified predictions.
+```
+
+The number of samples in each class of the testing set is 660. Both the
+'Cloudy' and 'Snowy' classes show better prediction performance.
+
+#### 3.2 Classification Tree (tuning cp value)
+
+```{r Decision Tree with cross validation, fig.width=5, fig.height=4, fig.align="center"}
+set.seed(123)
+# Find optimal complexity and tree size
+mse_prune <- c()
+i <- 1
+tree_model <- rpart(Weather.Type ~ ., 
+                    train_weather, 
+                    method="class", 
+                    cp=0.01, 
+                    control=rpart.control(xval=10))
+for (cp in seq(0, 0.1, by=0.01)){
+  model <- prune(tree_model, cp=cp) 
+  predicted <- predict(model, test_weather, type="class")
+  mse_prune[i] <- mean(test_weather$Weather != predicted)
+  i <- i+1 # don't forget this one
+}
+tibble(mse=mse_prune, cp=seq(0, 0.1, by=0.01)) %>% 
+  ggplot(aes(x=cp, y=mse)) + 
+  geom_point()+ 
+  geom_line() + 
+  theme_minimal() # best is 0.01
+
+
+rpart.plot(tree_model)
+
+#could also be with rpart control
+plotcp(tree_model) # see relationship between tree size, CP and relative error
+printcp(tree_model) # see relationship between tree size, CP and relative error
+```
+
+When CP = 0.01 (with 5 splits, as shown in the tree plot), the model
+achieves the lowest cross-validated error, but it results in a more
+complex model.
+
+#### Prediction on Classification Tree
+
+```{r}
+predictions_tree <- predict(tree_model, newdata = test_weather, type="class")
+
+confusionMatrix(predictions_tree, test_weather$Weather.Type) #accuracy 88.18%
+
+
+# Plot feature importance using ggplot2
+importance_data <- data.frame(
+  Feature = names(tree_model$variable.importance),
+  Importance = tree_model$variable.importance
+)
+
+ggplot(importance_data, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Feature Importance from Decision Tree Model", 
+       x = "Feature", 
+       y = "Importance") +
+  theme_minimal() +
+  coord_flip()  # Flip coordinates to make the bars horizontal
+
+# Create a data frame with true and predicted labels
+results_df <- tibble(True = test_weather$Weather, 
+                     Predicted = predictions_tree)
+
+# Faceted bar plot of True vs Predicted
+ggplot(results_df, aes(x = Predicted, fill = True)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = "count", aes(label = ..count..), 
+            position = position_dodge(width = 0.8), 
+            vjust = 0.5) + 
+  facet_wrap(~ True) +
+  labs(title = "True vs. Predicted Weather Types", 
+       x = "Predicted Weather Type", y = "Count") +
+  theme_minimal()
+
+# Visualize the splitting pattern of a decision tree model 
+# based on two features 
+ggplot(test_weather, 
+       aes(x = Temperature, y = Humidity, 
+           color = predictions_tree)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Predicted Weather Types by Temperature and Humidity", 
+       x = "Temperature", y = "Humidity", color = "Predicted") +
+  theme_minimal()
+```
+
+From the optimized Decision Tree, we achieved an accuracy of 88.18%. The
+top three most important variables are: Temperature, Precipitation, and
+Pressure. Notably, the 'Snowy' and 'Rainy' classes exhibit better
+prediction performance compared to other weather types. The scatter plot
+shows the distribution of data points based on Temperature and Humidity.
+We observe that data points for each class are more condensed along the
+Temperature axis (x-axis), indicating a clearer separation, whereas they
+are more dispersed along the Humidity axis (y-axis), reflecting greater
+variability in humidity across different weather types.
+
+#### 3.3 Random Forest (tuning mtry)
+
+```{r Random Forest with CV}
+set.seed(123)
+# Set up cross-validation with 5 folds
+control <- trainControl(method = "cv", number = 5)
+
+tune_grid <- expand.grid(mtry = 1:10)
+# Perform cross-validation using the caret package
+rf_cv <- train(Weather.Type ~ ., 
+               data = train_weather, 
+               method = "rf",
+               trControl = control, 
+               tuneGrid = tune_grid, 
+               ntree = 500)
+
+# Print the results
+print(rf_cv)
+
+# Extract the cross-validation results
+cv_results <- rf_cv$results
+
+# Plot the cross-validation error
+ggplot(cv_results, aes(x = mtry, y = 1 - Accuracy)) +
+  geom_point() +
+  geom_line() +
+  theme_minimal() +
+  labs(title = "Cross-Validation Error vs. mtry",
+       x = "mtry",
+       y = "CV Error (1 - Accuracy)") +
+  scale_x_continuous(breaks = 1:10) 
+#We got the highest acc when mtry=5 during tuning.
+
+
+# Prediction on the test set
+# Loop through mtry from 1 to 10 
+# just for validation: Does mtry=5 have the higest accuracy on test set
+accuracies <- numeric(10)
+mtry_values <- 1:10
+
+for (i in mtry_values) {
+  set.seed(123)
+  rf_mod <- randomForest(Weather.Type ~ ., 
+                         data = train_weather, 
+                         mtry = i, ntree = 500)
+  predictions_rf <- predict(rf_mod, newdata = test_weather) 
+  cm <- confusionMatrix(predictions_rf, test_weather$Weather.Type)
+  accuracies[i] <- cm$overall['Accuracy']
+  cat("mtry =", i, "Accuracy =", accuracies[i], "\n")
+}
+
+# Plot the accuracy of each mtry value
+accuracy_df <- tibble(mtry = mtry_values, accuracy = accuracies)
+ggplot(accuracy_df, aes(x = mtry, y = accuracy)) +
+  geom_point() +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    title = "Accuracy vs mtry for Random Forest Model",
+    x = "mtry",
+    y = "Accuracy"
+  ) +
+  scale_x_continuous(breaks = 1:10)
+```
+
+#### Prediction with Random Forest mtry=5
+
+```{r}
+set.seed(123)
+# Random forest with mtry=5
+rf_mod_5 <- randomForest(Weather.Type ~ ., 
+                         data = train_weather, 
+                         mtry=5, ntree = 500)
+
+#prediction on mtry5 model
+predictions_rf_5 <- predict(rf_mod_5, newdata = test_weather)
+head(predictions_rf_5)
+confusionMatrix(predictions_rf_5, test_weather$Weather.Type)
+# accuracy 91.67%
+
+# Visualize the confusion matrix
+cm_table <- as.table(cm$table)
+cm_data <- as.data.frame(cm_table)
+colnames(cm_data) <- c("Actual", "Predicted", "Freq")
+
+ggplot(data = cm_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Freq), vjust = 1) +
+  theme_minimal() +
+  labs(
+    title = "Confusion Matrix for Random Forest Model (mtry=5)",
+    x = "Actual",
+    y = "Predicted"
+  )
+
+#visualize variable importance
+var_imp <- importance(rf_mod_5)
+
+tibble(
+  importance = c(var_imp), 
+  variable = rownames(var_imp)
+ )%>% 
+  ggplot(aes(x = importance, y = reorder(variable,importance), 
+             fill = variable)) +
+  geom_bar(stat = "identity") +
+  scale_fill_viridis_d() +
+  theme_minimal() 
+```
+
+The random forest model with mtry = 5 (best test mtry) achieved an
+accuracy of 91.67%. The confusion matrix reveals that the classes
+'Snowy' and 'Cloudy' have better prediction performance compared to
+other classes. The top three most important variables contributing to
+the model are: Temperature, Precipitation, and UV Index which different
+than the ones for the classification trees for which: Temperature,
+Precipitation, and Pressure were the top 3 most important variables.
+
+#### Feature Selection: 
+We selected the five most important features based on the random forest model with mtry =5 to train, tune, and evaluate its performance.
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Define the range of mtry values to test (from 1 to 5)
+mtry_values <- 1:5
+
+# Initialize a variable to store the OOB error for each mtry
+oob_errors <- numeric(length(mtry_values))
+
+# Loop over each mtry value and fit a model, recording the OOB error
+for (i in mtry_values) {
+  model <- randomForest(
+    Weather.Type ~ Temperature + Precipitation + 
+      Visibility.km + UV.Index + Atmospheric.Pressure,
+    data = train_weather,
+    mtry = i,
+    ntree = 500
+  )
+  # Store the OOB error for the current model
+  oob_errors[i] <- model$err.rate[nrow(model$err.rate), "OOB"]
+}
+
+# Find the best mtry (with the lowest OOB error)
+best_mtry <- mtry_values[which.min(oob_errors)]
+best_mtry
+
+# Print the best mtry value and its corresponding OOB error
+cat("Best mtry:", best_mtry, "\n")
+cat("OOB Error at best mtry:", min(oob_errors), "\n")
+
+# Plot the OOB error for each mtry value
+plot(mtry_values, oob_errors, type = "b", pch = 19, col = "blue",
+     xlab = "mtry", ylab = "OOB Error Rate",
+     main = "OOB Error Rate for Different mtry Values")
+```
+
+From the OBB plot, we chose mtry=2 which has shown to have the lowest
+error rate for the top5 variable model.
+
+```{r}
+# Random forest with mtry=2 with the top 5 variable 
+# based on the variable importance plot
+set.seed(123)
+rf_mod_top_5<-  randomForest( 
+  Weather.Type ~ Temperature + Precipitation + 
+    Visibility.km + UV.Index + Atmospheric.Pressure, 
+  data = train_weather, 
+  mtry = 2, 
+  ntree = 500
+)
+#prediction on top 5 variables, mrty=2 model
+predictions_rf_top_5 <- predict(rf_mod_top_5, newdata = test_weather)
+head(predictions_rf_top_5)
+confusionMatrix(predictions_rf_top_5, test_weather$Weather.Type)
+# accuracy 0.89
+
+conf_mat <- confusionMatrix(predictions_rf_top_5, test_weather$Weather.Type)
+
+# Convert the confusion matrix to a data frame for ggplot
+conf_mat_df <- as.data.frame(conf_mat$table)
+
+# Plot the confusion matrix
+ggplot(data = conf_mat_df, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  labs(title = "Confusion Matrix", x = "Predicted", y = "Actual") +
+  theme_minimal()
+```
+
+The Random Forest model using only the top 5 variables and setting mtry
+= 2 achieved an accuracy of 89.66%. While this is a good result, it is
+lower than the model that included all the variables. This suggests
+that, while the top 5 variables may be the most informative, the
+additional, less important variables might still contribute to capturing
+some underlying patterns in the data, improving the model’s overall
+performance.
+
+#### 3.4. Comparison Model's Performance
+
+```{r Comparison of the performance, warning=FALSE, fig.width=5, fig.height=4, fig.align="center"}
+#form correction
+list_prediction <- list(predictions_knn, 
+     predictions_tree,
+     predictions_rf_5, 
+     predictions_rf_top_5)
+
+accuracy_list <- c()
+for (i in (1:4)){
+  cm<- confusionMatrix(list_prediction[[i]], test_weather$Weather)
+  accuracy_list[i] <- cm$overall["Accuracy"]
+}
+
+tibble(Model=c("KNN", "Decision Tree", 
+               "Random Forest mtry5",
+               "Random Forest Top 5 Variables"), 
+       Accuracy = accuracy_list) %>% 
+  ggplot(aes(x=Model, y= Accuracy,  group = 1)) + 
+  geom_point() + 
+  geom_line() + 
+  theme_minimal() + 
+  geom_label(aes(x = "Random Forest mtry5", y = 0.95, label = "Best Model")) +  
+  coord_cartesian(ylim = c(0.80, 1)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Overall, we evaluated several models: K-Nearest Neighbors (KNN),
+Decision Tree, Random Forest with mtry = 5 and Random Forest using the
+top 5 variables. The Random Forest model with mtry = 5 achieved the
+highest accuracy.
+
+Discussion of Model Performance Across Each Class: The following ROC
+plots displays the performance of the four models, evaluating their
+accuracy for each of the Weather class: sunny, cloudy, sunny and snowy,
+```{r include=FALSE}
+# Prediction if a day will be Sunny
+set.seed(123)
+# Get predicted probabilities for KNN model
+knn_probs <- predict(knn_fit, newdata = test_weather, type = "prob")
+# Get predicted probabilities for Decision Tree model
+tree_probs <- predict(tree_model, newdata = test_weather, type = "prob")
+# Train Random Forest model with mtry = 5
+rf_mod_5 <- randomForest(y = train_weather$Weather.Type, 
+                         x = train_weather[ ,-11], 
+                         mtry = 4, 
+                         ntree = 500)
+
+# Get predicted probabilities for Random Forest with mtry = 5
+rf_probs_5 <- predict(rf_mod_5, newdata = test_weather, type = "prob")
+
+# Train Random Forest model with the top 5 features and mtry=2
+rf_mod_top_5 <- randomForest(y = train_weather$Weather.Type, 
+                         x = train_weather[ ,-11], 
+                         mtry = 2, 
+                         ntree = 500)
+# Get predicted probabilities for Random Forest with mtry = 2 , top 5 variables
+rf_probs_top_5 <- predict(rf_mod_top_5, newdata = test_weather, type = "prob")
+
+# Generate ROC curves and calculate AUC for the different classes
+# Assuming 'Sunny' is the class of interest
+knn_roc <- roc(test_weather$Weather.Type, knn_probs[, "Sunny"])
+tree_roc <- roc(test_weather$Weather.Type, tree_probs[, "Sunny"])
+rf_roc_5 <- roc(test_weather$Weather.Type, rf_probs_5[, "Sunny"])
+rf_roc_top_5<- roc(test_weather$Weather.Type, rf_probs_top_5[, "Sunny"])
+```
+
+```{r}
+# Calculate AUC for each model
+knn_auc <- auc(knn_roc)
+tree_auc <- auc(tree_roc)
+rf_auc_5 <- auc(rf_roc_5)
+rf_roc_top_5 <- auc(rf_roc_top_5)
+
+# Print AUCs
+cat("KNN AUC:", knn_auc, "\n")
+cat("Decision Tree AUC:", tree_auc, "\n")
+cat("Random Forest (mtry=5) AUC:", rf_auc_5, "\n")
+cat("Random Forest (mtry=2) Top 5 Variables AUC:", rf_roc_top_5, "\n")
+# Plot the ROC curve for KNN as the initial plot
+plot(knn_roc, col = "blue", main = "ROC Curve Comparison - Sunny", lwd = 2)
+
+# Add other ROC curves to the same plot
+lines(tree_roc, col = "green", lwd = 2)
+lines(rf_roc_5, col = "red", lwd = 2)
+lines(rf_roc_top_5, col = "grey", lwd = 2)
+
+# Add legend
+legend("bottomright", 
+       legend = c("KNN", "Classification Tree", 
+                  "RF (mtry=5)",  "RF Top 5 Variables"),
+       col = c("blue", "green", "red", "grey"), 
+       lwd = 2)
+```
+```{r include=FALSE}
+# Generate ROC curves and calculate AUC for each class (Cloudy, Snowy, Rainy)
+
+# ROC for Cloudy class
+knn_roc_cloudy <- roc(test_weather$Weather.Type, knn_probs[, "Cloudy"])
+tree_roc_cloudy <- roc(test_weather$Weather.Type, tree_probs[, "Cloudy"])
+rf_roc_5_cloudy <- roc(test_weather$Weather.Type, rf_probs_5[, "Cloudy"])
+rf_roc_top_5_cloudy <- roc(test_weather$Weather.Type, rf_probs_top_5[, "Cloudy"])
+
+# ROC for Snowy class
+knn_roc_snowy <- roc(test_weather$Weather.Type, knn_probs[, "Snowy"])
+tree_roc_snowy <- roc(test_weather$Weather.Type, tree_probs[, "Snowy"])
+rf_roc_5_snowy <- roc(test_weather$Weather.Type, rf_probs_5[, "Snowy"])
+rf_roc_top_5_snowy <- roc(test_weather$Weather.Type, rf_probs_top_5[, "Snowy"])
+
+# ROC for Rainy class
+knn_roc_rainy <- roc(test_weather$Weather.Type, knn_probs[, "Rainy"])
+tree_roc_rainy <- roc(test_weather$Weather.Type, tree_probs[, "Rainy"])
+rf_roc_5_rainy <- roc(test_weather$Weather.Type, rf_probs_5[, "Rainy"])
+rf_roc_top_5_rainy <- roc(test_weather$Weather.Type, rf_probs_top_5[, "Rainy"])
+```
+
+```{r}
+# Cloudy ROC plot
+plot(knn_roc_cloudy, col = "blue", 
+     main = "ROC Curve Comparison - Cloudy", lwd = 2)
+lines(tree_roc_cloudy, col = "green", lwd = 2)
+lines(rf_roc_5_cloudy, col = "red", lwd = 2)
+lines(rf_roc_top_5_cloudy, col = "grey", lwd = 2)
+legend("bottomright", 
+       legend = c("KNN", "Classification Tree", 
+                  "RF (mtry=5)", "RF Top 5 Variables"),
+       col = c("blue", "green", "red", "grey"), 
+       lwd = 2)
+
+# Snowy ROC plot
+plot(knn_roc_snowy, col = "blue", 
+     main = "ROC Curve Comparison - Snowy", lwd = 2)
+lines(tree_roc_snowy, col = "green", lwd = 2)
+lines(rf_roc_5_snowy, col = "red", lwd = 2)
+lines(rf_roc_top_5_snowy, col = "grey", lwd = 2)
+legend("bottomright", 
+       legend = c("KNN", "Classification Tree", 
+                  "RF (mtry=5)", "RF Top 5 Variables"),
+       col = c("blue", "green", "red", "grey"), 
+       lwd = 2)
+
+# Rainy ROC plot
+plot(knn_roc_rainy, col = "blue", 
+     main = "ROC Curve Comparison - Rainy", lwd = 2)
+lines(tree_roc_rainy, col = "green", lwd = 2)
+lines(rf_roc_5_rainy, col = "red", lwd = 2)
+lines(rf_roc_top_5_rainy, col = "grey", lwd = 2)
+legend("bottomright", 
+       legend = c("KNN", "Classification Tree", 
+                  "RF (mtry=5)", "RF Top 5 Variables"),
+       col = c("blue", "green", "red",  "grey"), 
+       lwd = 2)
+```
+
+Conclusion: The Classification Tree model achieves the best AUC/ROC for
+Sunny and Snowy days compared to the other models, while the three other
+models (KNN and the two random Forests) struggle to categorize for these
+two classes. However, for the remaining two classes, all models provide
+strong predictive performance. The Classification tree has more
+consistent predictive performance than the three other models based on
+the ROC.
